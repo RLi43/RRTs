@@ -39,6 +39,7 @@ class RRT:
     
     def Search(self):
         ret = None
+        print("method: ",self.method)
         start_time = time.time()
         if self.method == "RRT":
             ret = self.rrtSearch()
