@@ -19,8 +19,9 @@ import copy
 import matplotlib.pyplot as plt
 import time
 import platform
+from mpl_toolkits.mplot3d import Axes3D
 
-show_animation = True
+show_animation = False
 
 class RRT:
     def __init__(self,_map=None,method="RRT-Connect",maxIter=500):
@@ -237,44 +238,50 @@ class RRT:
 
 
     def drawGraph(self, xCenter=None, cBest=None, cMin=None, etheta=None, rnd=None, new=None,drawnodes=True):
-        if self.dimension!=2:
-            return
-        plt.clf()
-        sysstr = platform.system()
-        if(sysstr =="Windows"):
-            scale = 18
-        elif(sysstr == "Linux"):
-            scale = 24
-        else: scale = 24
-        for (ox, oy, size) in self.map.obstacles:
-            plt.plot(ox, oy, "ok", ms=scale * size)
-        if rnd is not None:
-            plt.plot(rnd[0], rnd[1], "^k")
-        if new is not None:
-            plt.plot(new.x[0], new.x[1], "og")
-        
-        if drawnodes:
-            self.drawNodes()
+        if self.dimension==2:
+            plt.clf()
+            sysstr = platform.system()
+            if(sysstr =="Windows"):
+                scale = 18
+            elif(sysstr == "Linux"):
+                scale = 24
+            else: scale = 24
+            for (ox, oy, size) in self.map.obstacles:
+                plt.plot(ox, oy, "ok", ms=scale * size)
+            if rnd is not None:
+                plt.plot(rnd[0], rnd[1], "^k")
+            if new is not None:
+                plt.plot(new.x[0], new.x[1], "og")
+            
+            if drawnodes:
+                self.drawNodes()
 
-        plt.plot(self.map.xinit[0], self.map.xinit[1], "xr")
-        plt.plot(self.map.xgoal[0], self.map.xgoal[1], "xr")
-        plt.axis([self.map.xinit[0]+self.map.randBias[0],self.map.xinit[0]+self.map.randBias[0]+self.map.randLength[0],
-        self.map.xinit[1]+self.map.randBias[1],self.map.xinit[1]+self.map.randBias[1]+self.map.randLength[1]])
-        plt.grid(True)
+            plt.plot(self.map.xinit[0], self.map.xinit[1], "xr")
+            plt.plot(self.map.xgoal[0], self.map.xgoal[1], "xr")
+            plt.axis([self.map.xinit[0]+self.map.randBias[0],self.map.xinit[0]+self.map.randBias[0]+self.map.randLength[0],
+            self.map.xinit[1]+self.map.randBias[1],self.map.xinit[1]+self.map.randBias[1]+self.map.randLength[1]])
+            plt.grid(True)
+        elif self.dimension == 3:            
+            fig = plt.figure()
+            ax = fig.add_subplot(111, projection='3d')
 
     def drawNodes(self,nodes=None,color='g'):
         if nodes==None:
             nodes=self.nodes
-        for node in nodes:
-            if node.parent is not None:
-                plt.plot([node.x[0], node.parent.x[0]], 
-                [node.x[1], node.parent.x[1]], '-'+color)
-
-
+        if self.dimension == 2:
+            for node in nodes:
+                if node.parent is not None:
+                    plt.plot([node.x[0], node.parent.x[0]], 
+                    [node.x[1], node.parent.x[1]], '-'+color)
+        elif self.dimension == 3:
+            pass
 
     def drawPath(self):
-        plt.plot([x for (x, y) in self.path], [y for (x, y) in self.path], '-r')        
-        return
+        if self.dimension == 2:
+            plt.plot([x for (x, y) in self.path], [y for (x, y) in self.path], '-r')   
+        elif self.dimension == 3:
+            pass
+
 
 
 
@@ -326,13 +333,42 @@ def main():
     print("Start rrt planning")
 
     # create map
-    amap = Map()
+    map2Drand = Map()
+    map3Drand = Map(dim=3,obs_num=64,obs_size_max=5, xinit=[0,0,0],xgoal=[23,23,23],randBias=[-3,-3,-3],randLength=[29,29,29])
     
-    rrt = RRT(_map=amap)
-    rrt.drawGraph()
-    plt.pause(0.01)
-    input("any key to start")
+    rrt = RRT(_map=map3Drand,method="RRT-Connect")
+    if show_animation:
+        rrt.drawGraph()
+        plt.pause(0.01)
+        input("any key to start")
     rrt.Search()
+
+    #debug
+    fig = plt.figure()
+    ax = fig.gca(projection='3d')
+    for ob in rrt.map.obstacles:
+        ax.scatter(ob[0], ob[1], ob[2], c='B',s=ob[3]*100)    
+    nx = []
+    ny = []
+    nz = []
+    for node in rrt.nodes:
+        nx.append(node.x[0])
+        ny.append(node.x[1])
+        nz.append(node.x[2])
+    ax.scatter(nx, ny, nz, c='r',s=1)
+    nx = []
+    ny = []
+    nz = []
+    for node in rrt.path:
+        nx.append(node[0])
+        ny.append(node[1])
+        nz.append(node[2])
+    ax.plot(nx,ny,nz, label='parametric curve')
+    plt.show()
+
+
+
+
     print("Finished")
     
     # Plot path
