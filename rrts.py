@@ -2,7 +2,7 @@
 #coding:utf-8
 """
 RRTs path planning
-with RRT*, RRT-connect, informed RRT*
+with RRT*, RRT-connect, informed RRT* BIT*
 
 Reference: 
 Informed RRT*: Optimal Sampling-based Path Planning Focused via
@@ -11,14 +11,15 @@ Code from github TODO
 
 """
 
+import copy
+import math
+import platform
 import random
+import time
+
+import matplotlib.pyplot as plt
 import numpy as np
 import numpy.linalg as lng
-import math
-import copy
-import matplotlib.pyplot as plt
-import time
-import platform
 from mpl_toolkits.mplot3d import Axes3D
 
 show_animation = False
@@ -35,7 +36,7 @@ class RRT:
         self.dimension = self.map.dimension
         self.prob = 0.1
         self.maxIter = maxIter
-        self.stepSize = 0.4
+        self.stepSize = 0.5
         self.DISCRETE = 0.05
         self.path = []
         self.pathCost = float('inf')
@@ -55,6 +56,8 @@ class RRT:
             ret = self.rrtConnectSearch()
         elif self.method == "RRT*":
             ret = self.rrtStarSearch()
+        elif self.method == "Informed RRT*":
+            ret = self.InformedRRTStarSearch()
         else:
             print("Unsupported Method, please choose one of:")
             print("RRT, RRT-Connect")
@@ -63,6 +66,7 @@ class RRT:
             print("Solve Failed")
             return False
         
+        print("Get!")
         # getPath
         self.getPath()
         print("path cost(distance): ", self.pathCost," steps: ",len(self.path)," time_use: ",end_time-start_time)
@@ -102,29 +106,6 @@ class RRT:
             nnew = self.Extend(nnearest,xrand)
             if nnew!=None:
                 tree.addNode(nnew)
-                if(Node.distancenn(nnew,self.ngoal)<self.stepSize):
-                    tree.addNode(self.ngoal,parent=nnew)
-                    print("iter ",i," find!")
-                    return True
-            if show_animation:
-                self.drawGraph(rnd=xrand,new=nnew)
-                plt.pause(0.0001)
-        return False
-
-    def rrtStarSearch(self):
-        tree = Tree(self.ninit)
-        self.trees.append(tree)
-        for i in range(self.maxIter):
-            xrand = self.SampleRandomFreeFast()
-            nnearest,dis = tree.getNearest(xrand)
-            nnew = self.Extend(nnearest,xrand)
-            if nnew!=None:
-                tree.addNode(nnew)
-
-                # adjust
-                self.reParent(nnew,tree)
-                self.reWire(nnew,tree)
-
                 if(Node.distancenn(nnew,self.ngoal)<self.stepSize):
                     tree.addNode(self.ngoal,parent=nnew)
                     print("iter ",i," find!")
@@ -191,9 +172,34 @@ class RRT:
                 plt.pause(0.0001)
         return False
 
-    def InformedRRTStarSearch(self, animation=True):
+    def rrtStarSearch(self):
+        tree = Tree(self.ninit)
+        self.trees.append(tree)
+        for i in range(self.maxIter):
+            xrand = self.SampleRandomFreeFast()
+            nnearest,dis = tree.getNearest(xrand)
+            nnew = self.Extend(nnearest,xrand)
+            if nnew!=None:
+                tree.addNode(nnew)
 
-        self.nodeList = [self.start]
+                # adjust
+                self.reParent(nnew,tree)
+                self.reWire(nnew,tree)
+
+                if(Node.distancenn(nnew,self.ngoal)<self.stepSize):
+                    tree.addNode(self.ngoal,parent=nnew)
+                    print("iter ",i," find!")
+                    return True
+            if show_animation:
+                self.drawGraph(rnd=xrand,new=nnew)
+                plt.pause(0.0001)
+        return False
+
+    def InformedRRTStarSearch(self):
+        ret = False
+        tree = Tree(self.ninit)
+        self.trees.append(tree)
+
         # max length we expect to find in our 'informed' sample space, starts as infinite
         cBest = float('inf')
         pathLen = float('inf')
@@ -201,60 +207,65 @@ class RRT:
         path = None
 
         # Computing the sampling space
-        cMin = math.sqrt(pow(self.start.x - self.goal.x, 2)
-                         + pow(self.start.y - self.goal.y, 2))
-        xCenter = np.array([[(self.start.x + self.goal.x) / 2.0],
-                            [(self.start.y + self.goal.y) / 2.0], [0]])
-        a1 = np.array([[(self.goal.x - self.start.x) / cMin],
-                       [(self.goal.y - self.start.y) / cMin], [0]])
+        cMin = Node.distancenn(self.ninit,self.ngoal)
+        xCenter = np.array(list((self.ninit.x+self.ngoal.x)/2))
+        a1 = np.transpose([np.array((self.ngoal.x-self.ninit.x)/cMin)])
+        
+        # TODO
+        if self.dimension == 2:
+            etheta = math.atan2(a1[1], a1[0])
 
-        etheta = math.atan2(a1[1], a1[0])
         # first column of idenity matrix transposed
-        id1_t = np.array([1.0, 0.0, 0.0]).reshape(1, 3)
+        id1_t = np.array([1.0]+[0.0,]*(self.dimension-1)).reshape(1,self.dimension)
         M = a1 @ id1_t
         U, S, Vh = np.linalg.svd(M, 1, 1)
-        C = np.dot(np.dot(U, np.diag(
-            [1.0, 1.0, np.linalg.det(U) * np.linalg.det(np.transpose(Vh))])), Vh)
+        C = np.dot(np.dot(U, 
+            np.diag([1.0,]*(self.dimension-1)+[np.linalg.det(U) * np.linalg.det(np.transpose(Vh))]))
+            , Vh)
+        
+        new_best = False
 
         for i in range(self.maxIter):
-            # Sample space is defined by cBest
-            # cMin is the minimum distance between the start point and the goal
-            # xCenter is the midpoint between the start and the goal
-            # cBest changes when a new path is found
+            # Sample
+            if cBest < float('inf'):
+                # informed sample
+                if new_best:
+                    new_best = False
+                    # debug
+                    print(cBest,cMin)
+                    r = [cBest / 2.0]+[math.sqrt(cBest**2 - cMin**2) / 2.0,]*(self.dimension-1)
+                    L = np.diag(r)
 
-            rnd = self.informed_sample(cBest, cMin, xCenter, C)
-            nind = self.getNearestListIndex(self.nodeList, rnd)
-            nearestNode = self.nodeList[nind]
-            # steer
-            theta = math.atan2(rnd[1] - nearestNode.y, rnd[0] - nearestNode.x)
-            newNode = self.getNewNode(theta, nind, nearestNode)
-            d = self.lineCost(nearestNode, newNode)
+                xBall = self.sampleUnitBall()
+                xrand = np.dot(np.dot(C, L), xBall) + xCenter  
+            else: xrand = self.SampleRandomFreeFast()
 
-            isCollision = self.__CollisionCheck(newNode, self.obstacleList)
-            isCollisionEx = self.check_collision_extend(nearestNode, theta, d)
+            nnearest,dis = tree.getNearest(xrand)
+            nnew = self.Extend(nnearest,xrand)
+            if nnew!=None:
+                tree.addNode(nnew)
 
-            if isCollision and isCollisionEx:
-                nearInds = self.findNearNodes(newNode)
-                newNode = self.chooseParent(newNode, nearInds)
+                # adjust
+                self.reParent(nnew,tree)
+                self.reWire(nnew,tree)
 
-                self.nodeList.append(newNode)
-                self.rewire(newNode, nearInds)
+                if(Node.distancenn(nnew,self.ngoal)<self.stepSize):
+                    tree.addNode(self.ngoal,parent=nnew)
+                    print("iter ",i," find!")
+                    ret = True
+                    oldCost = self.pathCost
+                    self.getPath()
+                    print("Cost: ",self.pathCost)
+                    #TODO what if doesn't improve?
+                    if oldCost > self.pathCost:
+                        cBest = self.pathCost
+                        new_best = True
 
-                if self.isNearGoal(newNode):
-                    solutionSet.add(newNode)
-                    lastIndex = len(self.nodeList) - 1
-                    tempPath = self.getFinalCourse(lastIndex)
-                    tempPathLen = self.getPathLen(tempPath)
-                    if tempPathLen < pathLen:
-                        path = tempPath
-                        cBest = tempPathLen
+            if show_animation:
+                self.drawGraph(rnd=xrand,new=nnew)
+                plt.pause(0.0001)
 
-            if animation:
-                self.drawGraph(xCenter=xCenter,
-                               cBest=cBest, cMin=cMin,
-                               etheta=etheta, rnd=rnd)
-
-        return path
+        return ret
 
     def _CollisionPoint(self,x): 
         obs = self.map.obstacles
@@ -267,7 +278,7 @@ class RRT:
         if dis<self.DISCRETE:
             return False
         nums = int(dis/self.DISCRETE)
-        direction = (np.array(x1)-np.array(x2))/Node.distancexx(x1,x2)
+        direction = (np.array(x2)-np.array(x1))/Node.distancexx(x1,x2)
         for i in range(nums+1):
             x = np.add(x1 , i*self.DISCRETE*direction)
             if self._CollisionPoint(x): return True
@@ -309,7 +320,7 @@ class RRT:
     
     def reParent(self,node,tree):
         # TODO: check node in tree
-        nears = tree.getNearby(node,self.nearDis)
+        nears = tree.getNearby(node)
         for n in nears:
             if self._CollisionLine(n.x,node.x):
                 continue
@@ -321,7 +332,7 @@ class RRT:
 
     # what if combine the both?
     def reWire(self,node,tree):
-        nears = tree.getNearby(node,self.nearDis)
+        nears = tree.getNearby(node)
         for n in nears:
             if self._CollisionLine(n.x,node.x):
                 continue
@@ -348,30 +359,13 @@ class RRT:
             ret.append(random.random()*self.map.randLength[i]+self.map.randBias[i])
         return ret
     
-    def informed_sample(self, cMax, cMin, xCenter, C):
-        if cMax < float('inf'):
-            r = [cMax / 2.0,
-                 math.sqrt(cMax**2 - cMin**2) / 2.0,
-                 math.sqrt(cMax**2 - cMin**2) / 2.0]
-            L = np.diag(r)
-            xBall = self.sampleUnitBall()
-            rnd = np.dot(np.dot(C, L), xBall) + xCenter
-            rnd = [rnd[(0, 0)], rnd[(1, 0)]]
-        else:
-            rnd = self.sampleFreeSpace()
-
-        return rnd
 
     def sampleUnitBall(self):
-        a = random.random()
-        b = random.random()
+        sample = []
+        for i in range(self.dimension):
+            sample.append(random.random())
 
-        if b < a:
-            a, b = b, a
-
-        sample = (b * math.cos(2 * math.pi * a / b),
-                  b * math.sin(2 * math.pi * a / b))
-        return np.array([[sample[0]], [sample[1]], [0]])
+        return np.array(sample)/lng.norm(sample)
 
 
     def drawGraph(self, xCenter=None, cBest=None, cMin=None, etheta=None, rnd=None, new=None,drawnodes=True):
@@ -450,7 +444,7 @@ class RRT:
 
 class Node:
     def __init__(self,x,lcost=0.0,cost=float('inf'),parent=None):
-        self.x = x
+        self.x = np.array(x)
         self.lcost = lcost # from parent
         self.cost = cost # from init
         self.parent = parent
@@ -496,8 +490,10 @@ class Tree:
                 nnearest = node
         return nnearest,dis
     
-    def getNearby(self,nto,dis):
+    def getNearby(self,nto,dis=None):
         ret = []
+        if dis==None:
+            dis = 20.0 * math.sqrt((math.log(self.length()) / self.length()))
         for n in self.nodes:
             if Node.distancenn(nto,n)<dis:
                 ret.append(n)
@@ -521,12 +517,53 @@ class Map:
             ob.append(random.random()*obs_size_max+0.2)
             self.obstacles.append(ob)
 
+def rewireAfterRRT(_map):    
+    rrt2 = RRT(_map=map2Drand,method="RRT")
+    rrt2.Search()
+    
+    rrt2.drawGraph()
+    rrt2.drawTree()
+    rrt2.drawPath()
+    plt.show()
+    
+    #debug
+    #rewire
+    start_time = time.time()
+    probnodes = []
+    for n in rrt2.trees[0].nodes:
+        if Node.distancenn(n,rrt2.ninit)+Node.distancenn(n,rrt.ngoal) < rrt2.pathCost:
+            probnodes.append(n)
+    print(len(probnodes))
+    for node in probnodes:
+        for n in rrt2.trees[0].getNearby(node):
+            if rrt2._CollisionLine(n.x,node.x):
+                continue
+            newl = Node.distancenn(n,node)
+            if node.cost + newl < n.cost:
+                n.parent = node
+                n.lcost = newl
+                n.cost = node.cost + newl    
+    end_time = time.time()    
+    # getPath
+    rrt2.path=[]
+    rrt2.getPath()
+    print("path cost(distance): ", rrt2.pathCost," steps: ",len(rrt2.path)," time_use: ",end_time-start_time)
+
+    rrt2.drawGraph()
+    rrt2.drawTree()
+    rrt2.drawPath()
+    plt.show()
+
+
+
+
+
 def main():
     print("Start rrt planning")
 
     # create map
     map2Drand = Map()
-    map3Drand = Map(dim=3,obs_num=64,obs_size_max=5, xinit=[0,0,0],xgoal=[23,23,23],randBias=[-3,-3,-3],randLength=[29,29,29])
+    map3Drand = Map(dim=3,obs_num=20,obs_size_max=2, xinit=[0,0,0],xgoal=[23,23,23],randBias=[-3,-3,-3],randLength=[29,29,29])
     
     rrt = RRT(_map=map2Drand,method="RRT*")
     if show_animation:
@@ -534,6 +571,11 @@ def main():
         plt.pause(0.01)
         # input("any key to start")
     rrt.Search()
+
+    rrt.drawGraph()
+    rrt.drawTree()
+    rrt.drawPath()
+    plt.show()
 
     # #debug for 3D
     # fig = plt.figure()
@@ -557,19 +599,6 @@ def main():
     #     nz.append(node[2])
     # ax.plot(nx,ny,nz, label='parametric curve')
     # plt.show()
-
-    rrt2 = RRT(_map=map2Drand,method="RRT")
-    rrt2.Search()
-
-    rrt.drawGraph()
-    rrt.drawTree()
-    rrt.drawPath()
-    plt.show()
-
-    rrt2.drawGraph()
-    rrt2.drawTree()
-    rrt2.drawPath()
-    plt.show()
 
 
     print("Finished")
