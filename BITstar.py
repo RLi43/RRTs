@@ -259,9 +259,9 @@ class BITstar(object):
     def ballSample(self):
         ret = []
         for i in range(self.dimension):
-            ret.append(random.random())
+            ret.append(random.random()*2-1)
         ret = np.array(ret)
-        return ret/np.linalg.norm(ret)
+        return ret/np.linalg.norm(ret)*random.random()
 
     def SampleRandomFree(self):
         ret = self._SampleRandom()
