@@ -101,7 +101,7 @@ class BITstar(object):
                     self.drawPath()
                 # # debug
                 # print(self.E)
-                # return True
+                return True
                 hhxm = self.distance(1,xind)
                 if self.gT[vind] + self.distance(vind,xind) + hhxm >= self.gT[1]:
                     # 不知道python需不需要清指针……
@@ -161,7 +161,6 @@ class BITstar(object):
         try:
             self.V_old.index(vind)
         except:
-            V_near = []
             for wi in self.V:
                 if self.distance(wi,vind) > self.r:
                     continue
@@ -209,7 +208,7 @@ class BITstar(object):
         # zeta = math.pi**(self.dimension/2)/GAMMA_N[self.dimension-1]
         # lamb = math.pi**(self.dimension/2)/GAMMA_N[self.dimension-1]*cMax/2*(math.sqrt(cMax**2-self.cMin**2)/2)**(self.dimension-1)
         # return self.eita*(math.log(q)/q*lamb/zeta)**(1/self.dimension)
-        return 20.0 * math.sqrt((math.log(q) / q))
+        return 30.0 * math.sqrt((math.log(q) / q))
         # return self.eita*(math.log(q)/q*(cMax/(math.sqrt(cMax**2-self.cMin**2)))**(self.dimension-1))**(1/self.dimension)
 
     
@@ -404,8 +403,13 @@ def main():
 
     # create map
     map2Drand = Map()
+    map3Drand = Map(dim=3,obs_num=30,xinit=[0,0,0],xgoal=[23,23,23],xlim1=[-3,-3,-3],xlim2=[26,26,26])
 
-    bit = BITstar(map2Drand)
+    
+    rrt = RRT(_map=map3Drand,method="RRT*")
+    rrt.Search()
+
+    bit = BITstar(map3Drand,batchSize=50)
     # show map
     if show_animation:
         bit.map.drawMap()
@@ -418,14 +422,11 @@ def main():
     plt.show()
     print("Finished")
     
-    
-    rrt = RRT(_map=map2Drand,method="RRT*")
-    rrt.Search()
 
-    rrt.drawGraph()
-    rrt.drawTree()
-    rrt.drawPath()
-    plt.show()
+    # rrt.drawGraph()
+    # rrt.drawTree()
+    # rrt.drawPath()
+    # plt.show()
     
 
 
