@@ -31,6 +31,7 @@ class BITstar(object):
         self.maxIter = maxIter
         self.batchSize = batchSize
         self.DISCRETE = self.map.DISCRETE
+        self.pathCost = float('inf')
         
         self.eita = 1.2*2*(1+1/self.dimension)**(1/self.dimension) #?
 
@@ -94,10 +95,12 @@ class BITstar(object):
             # have a feasible path
             if self.gT[1] < float('inf'):
                 ret = True
-                print('pathCost:',self.gT[1])
-                # debug
-                print(self.E)
-                return True
+                if self.pathCost!= self.gT[1]:
+                    print('pathCost:',self.gT[1])
+                    self.pathCost = self.gT[1]
+                # # debug
+                # print(self.E)
+                # return True
                 hhxm = self.distance(1,xind)
                 if self.gT[vind] + self.distance(vind,xind) + hhxm >= self.gT[1]:
                     # 不知道python需不需要清指针……
@@ -256,8 +259,9 @@ class BITstar(object):
     def ballSample(self):
         ret = []
         for i in range(self.dimension):
-            ret.append(random.random)
-        ret = np.array(ret)/np.linalg.norm(np.array(ret))
+            ret.append(random.random())
+        ret = np.array(ret)
+        return ret/np.linalg.norm(ret)
 
     def SampleRandomFree(self):
         ret = self._SampleRandom()
