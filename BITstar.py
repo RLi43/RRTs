@@ -98,6 +98,7 @@ class BITstar(object):
                 if self.pathCost!= self.gT[1]:
                     print('pathCost:',self.gT[1])
                     self.pathCost = self.gT[1]
+                    self.drawPath()
                 # # debug
                 # print(self.E)
                 # return True
@@ -321,6 +322,7 @@ class BITstar(object):
     def drawGraph(self):
         # print(self.V)
         # print(self.E)
+        plt.clf()
         if self.dimension == 2:
             self.map.drawMap()
             for xind in self.X_samples:
