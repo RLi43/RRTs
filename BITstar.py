@@ -290,7 +290,10 @@ class BITstar(object):
     
     def qeAdd(self,vind,xind):
         dis = self.gT[vind] + self.distance(vind,xind) + self.distance(xind,1)
-        self.qe.put((dis,[vind,xind]))
+        try:
+            self.qe.queue.index((dis,[vind,xind]))
+        except:
+            self.qe.put((dis,[vind,xind]))
 
     # # gT(v)+hh(v)
     # def BestQueueV(self):
