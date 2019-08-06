@@ -22,7 +22,7 @@ import numpy as np
 import numpy.linalg as lng
 from mpl_toolkits.mplot3d import Axes3D
 
-show_animation = False
+show_animation = True
 
 class RRT:
     def __init__(self,_map=None,method="RRT-Connect",maxIter=500):
@@ -565,7 +565,7 @@ def main():
     map2Drand = Map()
     map3Drand = Map(dim=3,obs_num=20,obs_size_max=2, xinit=[0,0,0],xgoal=[23,23,23],randBias=[-3,-3,-3],randLength=[29,29,29])
     
-    rrt = RRT(_map=map2Drand,method="RRT*")
+    rrt = RRT(_map=map2Drand,method="RRT")
     if show_animation:
         rrt.drawGraph()
         plt.pause(0.01)
