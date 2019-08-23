@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 #coding:utf-8
 
+### ---------------
+# BIBITSTAR - biBiT* - bidirectional Batch Informed Tree 
+# Author: RLi
+### ---------------
+
 import copy
 import math
 import platform
@@ -11,34 +16,38 @@ import queue
 
 import matplotlib.pyplot as plt
 
-show_animation = False
+show_animation = True
 
-class BITstar(object):
-    def __init__(self,_map,batchSize=30,maxIter=10):
-        self.map = _map
-        self.dimension = _map.dimension
+def _dis(x1,x2):
+    return np.linalg.norm(np.array(x1)-np.array(x2))
+    
 
-        self.x = [_map.xinit,_map.xgoal]
-        self.V = [0]
-        self.E = [[],[]]
-        self.gT = [0,float('inf')]
-        self.X_samples = [1]
-        self.qv = queue.PriorityQueue() # index of X
-        self.qe = queue.PriorityQueue() # indexs of X [vind,xind/vind2]
-        self.V_old = []
-        self.r = float('inf')
+def radius(q):
+    return 30.0 * math.sqrt((math.log(q) / q))
 
-        self.maxIter = maxIter
-        self.batchSize = batchSize
-        self.DISCRETE = self.map.DISCRETE
-        self.pathCost = float('inf')
-        
-        self.eita = 1.2*2*(1+1/self.dimension)**(1/self.dimension) #?
+# map
+class Map:
+    def __init__(self,dim=2,obs_num=20,obs_size_max=2.5,xinit=[0,0],xgoal=[23,23],randMax=[30,30],randMin=[-5,-5]):
+        self.dimension = dim
+        self.xinit = xinit
+        self.xgoal = xgoal
+        self.randMax = randMax
+        self.randMin = randMin
+        self.obstacles = []
+        self.DISCRETE = 0.05
 
-        # Computing the sampling space
-        xinit = self.map.xinit
-        xgoal = self.map.xgoal
-        self.cMin = self.distance(0,1)
+        self.obstacles = [[3,3,3],[10,10,5],[4,15,3],[20,5,4],[7,6,2],[15,25,3],[20,13,2],[0,20,3],[17,17,2]]
+        # # obstacles
+        # for i in range(obs_num):
+        #     #TODO
+        #     ob = []
+        #     for j in range(dim):
+        #         ob.append(random.random()*20+1.5)
+        #     ob.append(random.random()*obs_size_max+0.2)
+        #     self.obstacles.append(ob)
+
+        # informed        
+        self.cMin = _dis(self.xinit,self.xgoal)
         self.xCenter = (np.array(xinit)+np.array(xgoal))/2
         a1 = np.transpose([(np.array(xgoal)-np.array(xinit))/self.cMin])        
         # first column of idenity matrix transposed
@@ -48,178 +57,14 @@ class BITstar(object):
         self.C = np.dot(np.dot(U, 
             np.diag([1.0,]*(self.dimension-1)+[np.linalg.det(U) * np.linalg.det(np.transpose(Vh))]))
             , Vh)
-    
-    def search(self):
-        ret = False
-        i = 0
-        while True:
 
-            # batch creation
-            if self.qe.empty() and self.qv.empty():
-                i += 1
-                if i == self.maxIter: break
-                # self.Prune(self.gT[1])
-                self.Sample()
-                self.V_old = self.V.copy()
-                for vind in self.V:
-                    self.qvAdd(vind)
-                self.r = self.radius(len(self.x))
-                print("Batch ",i," r:",self.r,"V:",len(self.V),"E:",len(self.E))
-                self.drawGraph()
-                plt.pause(0.01)
-            
-            # Edge Selection
-            bothEmpty = False
-            while True:
-                if self.qv.empty():
-                    if self.qe.empty():
-                        print('error! 73 - qe and qv are both empty')
-                        bothEmpty = True
-                    else:
-                        (evalue,[vind,xind]) = self.qe.get()
-                    break
-                (vvalue,vin) = self.qv.get()
-                if self.qe.empty():
-                    self.ExpandVertex(vin)
-                else:
-                    (evalue, [vind,xind]) = self.qe.get()
-                    if evalue < vvalue:
-                        self.qv.put((vvalue,vin))
-                        break
-                    else:
-                        self.qe.put((evalue,[vind,xind]))
-                        self.ExpandVertex(vin)
-            if bothEmpty:
-                continue
-            # Edge process
-            # have a feasible path
-            if self.gT[1] < float('inf'):
-                ret = True
-                if self.pathCost!= self.gT[1]:
-                    print('pathCost:',self.gT[1])
-                    self.pathCost = self.gT[1]
-                    self.drawPath()
-                # # debug
-                # print(self.E)
-                return True
-                hhxm = self.distance(1,xind)
-                if self.gT[vind] + self.distance(vind,xind) + hhxm >= self.gT[1]:
-                    # 不知道python需不需要清指针……
-                    self.qe = queue.PriorityQueue()
-                    self.qv = queue.PriorityQueue()
-                    continue
-                cost = self.cost(vind,xind)
-                if self.distance(0,vind) + cost + hhxm >= self.gT[1]:
-                    continue
-            else:
-                cost = self.cost(vind,xind)
-                if cost == float('inf'):
-                    continue
-
-            try:
-                self.V.index(xind)
-                if self.gT[vind] + cost >= self.gT[xind]:
-                    continue
-                self.gT[xind] = self.gT[vind] + cost
-                # prune (v,xm)
-                for vin in self.E[xind]:
-                    self.E[vin].remove(xind)
-                self.E[xind] = []
-            except:
-                self.X_samples.remove(xind)
-                self.V.append(xind)
-                self.gT[xind] = self.gT[vind] + cost
-                self.qvAdd(xind)
-                
-            self.E[xind] = [vind]
-            self.E[vind].append(xind)
-            # prune qe
-            newqe = queue.PriorityQueue()
-            while not self.qe.empty():
-                (evalue,[vi,xi]) = self.qe.get()
-                if xi != xind or self.gT[vi] + self.distance(vi,xind) >= self.gT[xind]:
-                    newqe.put((evalue,[vi,xi]))
-            self.qe = newqe
-            if show_animation:
-                self.drawGraph()
-                plt.pause(0.01)
-        
-        return ret
-    
-    def ExpandVertex(self,vind):
-        for xind in self.X_samples:
-            if self.distance(xind,vind) > self.r:
-                continue
-            for vi in self.V:
-                if vi == xind:
-                    print("error!")
-                if self.gT[1] < float('inf'):
-                    if self.distance(0,vi)+self.distance(vi,xind)+self.distance(xind,1) >= self.gT[1]:
-                        continue
-                self.qeAdd(vi,xind)
-        
-        try:
-            self.V_old.index(vind)
-        except:
-            for wi in self.V:
-                if self.distance(wi,vind) > self.r:
-                    continue
-                for vi in self.V:
-                    if vi == wi: continue
-                    try:
-                        self.E[vi].index(wi)
-                        self.E[wi].index(vi)
-                    except:
-                        if self.distance(0,vi)+self.distance(vi,wi)+self.distance(wi,1) < self.gT[1] \
-                            and self.gT[vi] + self.distance(vi,wi) < self.gT[1]:
-                            self.qeAdd(vi,wi)
-    
-    def Prune(self,c):
-        assert c>0
-        if c== float('inf'): return
-        # 暴力删除法 会有冗余
-        for xi in range(len(self.x)):
-            if self.distance(0,xi)+self.distance(xi,1)>c:
-                try:
-                    self.V.index(xi)
-                    self.V.remove(xi)
-                except:
-                    # should be in samples
-                    # if error occur, debug...
-                    self.X_samples.index(xi)
-                    self.X_samples.remove(xi)
-                for v2 in self.E[xi]:
-                    self.E[v2].remove(xi)
-                self.E[xi] = []
-                self.x[xi] = []
-        # 在删除时操作可能会快一点 # 但可能不想那么快剪枝呢
-        for vind in self.V:
-            if len(self.E[vind]) == 0:
-                self.V.remove(vind)
-                self.X_samples.append(vind)
-
-    # 2*eita*((1+1/n)*(lambda(X_fh)/zeta_n)*log(q)/q)**(1/n)
-    # zeta_n ~ the volume of the unit ball in the d-dimensional Euclidean space
-    #          = pi^(n/2)/Gamma(n/2+1)*r^n
-    #          好吧，就列表了……
-    # lambda(X_fh) ~ Lebesgue measure (e.g. volume) of the X_fh = {x in X|f(x)<cbest}
-    # 参考的代码里直接=2.0 ………… 行吧……
-    def radius(self,q):
-        # zeta = math.pi**(self.dimension/2)/GAMMA_N[self.dimension-1]
-        # lamb = math.pi**(self.dimension/2)/GAMMA_N[self.dimension-1]*cMax/2*(math.sqrt(cMax**2-self.cMin**2)/2)**(self.dimension-1)
-        # return self.eita*(math.log(q)/q*lamb/zeta)**(1/self.dimension)
-        return 30.0 * math.sqrt((math.log(q) / q))
-        # return self.eita*(math.log(q)/q*(cMax/(math.sqrt(cMax**2-self.cMin**2)))**(self.dimension-1))**(1/self.dimension)
-
-    
-    def CollisionPoint(self,x):        
-        obs = self.map.obstacles
-        for ob in obs:
+    def collision(self,x):
+        for ob in self.obstacles:
             if _dis(x,ob[:-1])<=ob[-1]:
                 return True
         return False
-        
-    def CollisionLine(self,x1,x2):
+
+    def collisionLine(self,x1,x2):
         dis = _dis(x1,x2)
         if dis<self.DISCRETE:
             return False
@@ -227,35 +72,28 @@ class BITstar(object):
         direction = (np.array(x2)-np.array(x1))/_dis(x1,x2)
         for i in range(nums+1):
             x = np.add(x1 , i*self.DISCRETE*direction)
-            if self.CollisionPoint(x): return True
-        if self.CollisionPoint(x2): return True
+            if self.collision(x): return True
+        if self.collision(x2): return True
         return False
-    
-    def distance(self,ind1,ind2):
-        return _dis(self.x[ind1],self.x[ind2])
 
 
-    def Sample(self):
-        ind = len(self.x)
-        for i in range(self.batchSize):
-            self.x.append(self._Sample())
-            self.X_samples.append(ind+i)
-            self.E.append([])
-            self.gT.append(float('inf'))
-
-    def _Sample(self):
-        cMax = self.gT[1]
-        if cMax<float('inf'):
-            # ecllipse
-            L = np.diag([cMax/2]+[math.sqrt(cMax**2-self.cMin**2)/2,]*(self.dimension-1))
-            cl = np.dot(self.C,L)
+    def randomSample(self):
+        x = []
+        for j in range(self.dimension):
+            x.append(random.random()*(self.randMax[j]-self.randMin[j])+self.randMin[j])
+        return x
+    def freeSample(self):
+        x = self.randomSample()
+        while self.collision(x):
+            x = self.randomSample()
+        return x
+    def informedSample(self,cMax):
+        L = np.diag([cMax/2]+[math.sqrt(cMax**2-self.cMin**2)/2,]*(self.dimension-1))
+        cl = np.dot(self.C,L)
+        x = np.dot(cl,self.ballSample())+self.xCenter
+        while self.collision(x):
             x = np.dot(cl,self.ballSample())+self.xCenter
-            while self.CollisionPoint(x):
-                x = np.dot(cl,self.ballSample())+self.xCenter
-            return list(x)
-        else:
-            return self.SampleRandomFree()
-
+        return list(x)
     def ballSample(self):
         ret = []
         for i in range(self.dimension):
@@ -263,547 +101,393 @@ class BITstar(object):
         ret = np.array(ret)
         return ret/np.linalg.norm(ret)*random.random()
 
-    def SampleRandomFree(self):
-        ret = self._SampleRandom()
-        while self.CollisionPoint(ret):
-            ret = self._SampleRandom()
-        return ret        
-
-    # random sample in whole space   
-    def _SampleRandom(self):
-        ret = []
-        for i in range(self.dimension):
-            ret.append(random.random()*(self.map.xlimmax[i]-self.map.xlimmin[i])+self.map.xlimmin[i])
-        return ret
-
-    def cost(self,ind1,ind2):
-        if self.CollisionPoint(self.x[ind1]) or self.CollisionPoint(self.x[ind2]) \
-            or self.CollisionLine(self.x[ind1],self.x[ind2]):
-            return float('inf')
-        return self.distance(ind1,ind2)
-
-
-    # gT(v)+hh(v)
-    def qvAdd(self,vind):
-        dis = self.gT[vind] + self.distance(vind,1)
-        self.qv.put((dis,vind))
-    
-    def qeAdd(self,vind,xind):
-        dis = self.gT[vind] + self.distance(vind,xind) + self.distance(xind,1)
-        try:
-            self.qe.queue.index((dis,[vind,xind]))
-        except:
-            self.qe.put((dis,[vind,xind]))
-
-    # # gT(v)+hh(v)
-    # def BestQueueV(self):
-    #     mDis = float('inf')
-    #     bvind = -1
-    #     for vind in self.qv:
-    #         dis = self.gT[vind] + self.distance(vind,1) 
-    #         if dis < mDis:
-    #             bvind = vind
-    #             mDis = dis
-    #     return mDis, bvind
-             
-    # # gT(v)+ch(v,x)+hh(x)
-    # def BestQueueE(self):
-    #     mDis = float('inf')
-    #     beind = -1
-    #     for eind in range(len(self.qe)):
-    #         [vind,xind] = self.qe[eind]
-    #         dis = self.gT[vind] + self.distance(vind,xind) + self.distance(xind,1)
-    #         if dis < mDis:
-    #             mDis = dis
-    #             beind = eind
-    #     return mDis, beind
-
-    def drawGraph(self):
-        # print(self.V)
-        # print(self.E)
-        plt.clf()
-        if self.dimension == 2:
-            self.map.drawMap()
-            for xind in self.X_samples:
-                plt.plot(self.x[xind][0],self.x[xind][1],'ob')            
-            
-            # qes = queue.PriorityQueue()
-            # while not self.qe.empty():
-            #     (dis,[vind,xind]) = self.qe.get()
-            #     qes.put((dis,[vind,xind]))
-            #     plt.plot([self.x[vind][0], self.x[xind][0]], 
-            #         [self.x[vind][1], self.x[xind][1]], '-r')
-            # self.qe = qes
-
-            for vind in self.V:
-                for v2 in self.E[vind]:
-                    plt.plot([self.x[vind][0], self.x[v2][0]], 
-                        [self.x[vind][1], self.x[v2][1]], '-g')
-    
-    def drawPath(self):
-        p1 = 1
-        p2 = self.E[p1][0]
-        plt.plot([self.x[p1][0], self.x[p2][0]], 
-                        [self.x[p1][1], self.x[p2][1]], '-r')
-        step = 1
-        while p2!=0:
-            step += 1
-            mGt = float('inf')
-            for p in self.E[p2]:
-                if self.gT[p] <mGt:
-                    mGt = self.gT[p]
-                    p3 = p
-            plt.plot([self.x[p2][0], self.x[p3][0]], 
-                            [self.x[p2][1], self.x[p3][1]], '-r')
-            p2 = p3
-        print("step:",step)
-
-
-class Map:
-    def __init__(self,dim=2,obs_num=15,obs_size_max=2.5,xinit=[0,0],xgoal=[23,23],xlim1=[-3,-3],xlim2=[26,26]):
-        self.dimension = dim
-        self.xlimmin = xlim1
-        self.xlimmax = xlim2
-        self.xinit = xinit
-        self.xgoal = xgoal
-        self.obstacles = []
-        self.DISCRETE = 0.05
-
-        for i in range(obs_num):
-            #TODO
-            ob = []
-            for j in range(dim):
-                ob.append(random.random()*20+1.5)
-            ob.append(random.random()*obs_size_max+0.2)
-            self.obstacles.append(ob)
     
     def drawMap(self):
         if self.dimension==2:
             plt.clf()
             sysstr = platform.system()
             if(sysstr =="Windows"):
-                scale = 18
+                scale = 16
             elif(sysstr == "Linux"):
-                scale = 24
-            else: scale = 24
+                scale = 20
+            else: scale = 20
             for (ox, oy, size) in self.obstacles:
                 plt.plot(ox, oy, "ok", ms=scale * size)
             
             plt.plot(self.xinit[0],self.xinit[1], "xr")
             plt.plot(self.xgoal[0],self.xgoal[1], "xr")
-            plt.axis([self.xlimmin[0],self.xlimmax[0],self.xlimmin[1],self.xlimmax[1]])
+            plt.axis([self.randMin[0]-2,self.randMax[0]+2,self.randMin[1]-2,self.randMax[1]+2])
             plt.grid(True)
 
+### main algorithm
 
-def _dis(x1,x2):
-    return np.linalg.norm(np.array(x1)-np.array(x2))
-
-def main():
-    print("Start rrt planning")
-
-    # create map
-    map2Drand = Map()
-    map3Drand = Map(dim=3,obs_num=30,xinit=[0,0,0],xgoal=[23,23,23],xlim1=[-3,-3,-3],xlim2=[26,26,26])
-
-    
-    rrt = RRT(_map=map3Drand,method="RRT*")
-    rrt.Search()
-
-    bit = BITstar(map3Drand,batchSize=50)
-    # show map
-    if show_animation:
-        bit.map.drawMap()
-    start_time = time.time()
-    bit.search()
-    print("time_use: ",time.time()-start_time)
-    #debug
-    bit.drawGraph()
-    bit.drawPath()
-    plt.show()
-    print("Finished")
-    
-
-    # rrt.drawGraph()
-    # rrt.drawTree()
-    # rrt.drawPath()
-    # plt.show()
-    
-
-
-    # Plot path
-    if  rrt.dimension==2 and show_animation:
-        rrt.drawGraph()
-        plt.show()
-
-
-
-class RRT:
-    def __init__(self,_map=None,method="RRT-Connect",maxIter=500):
-        if _map == None:
-            self.map = Map()
-        else: self.map = _map
-        self.method = method
-        self.trees = []
-        self.ninit = Node(self.map.xinit,cost=0,lcost=0)
-        self.ngoal = Node(self.map.xgoal)
-        self.dimension = self.map.dimension
-        self.prob = 0.1
+## main Class
+class BITstar(object):
+    def __init__(self,_map,maxIter =300, bn=10):
+        self.map = _map
+        self.batchSize = bn
         self.maxIter = maxIter
-        self.stepSize = 0.5
-        self.DISCRETE = 0.05
-        self.path = []
-        self.pathCost = float('inf')
+        self.bestCost = float('inf')
+        #self.bestConn = None
+        self.GoalInd = None
 
-        # *
-        self.nearDis = 2
+        self.x = [_map.xinit,_map.xgoal] # store all the point(samples, vertices)
+        self.r = float('inf')
+
+        self.qe = queue.PriorityQueue() # ecost,[vtind, xind]
+        self.qv = queue.PriorityQueue() # the index in Tree
+        self.vold = []                  # the index in Tree
+        self.Tree = [0]
+        self.X_sample = [1]
+        # because python alway copy a vertex for me ... :(
+        #self.isGtree = [True,False] # accroding to the order in Tree
+        self.cost = [0]           # accroding to the order in Tree
+        self.parent = [None]   # accroding to the order in tree
+        self.children = [[]]     # accroding to the order in Tree
+        self.depth = [0]          # accroding to the order in Tree
+        #self.conn = {}
+
+        self.rewire = False
+
+        self.pruneNum = 0
+
+        self.qv.put((self.distance(0,1),0))
+        #self.qv.put((self.distance(0,1),1))
+
+        # if show_animation:
+        #     self.map.drawMap()
     
-    def Search(self):
-        ret = False
-        print("method: ",self.method)
-        # Search
-        start_time = time.time()
-        if self.method == "RRT":
-            ret = self.rrtSearch()
-        elif self.method == "RRT-Connect":
-            self.prob = 0
-            ret = self.rrtConnectSearch()
-        elif self.method == "RRT*":
-            ret = self.rrtStarSearch()
-        elif self.method == "Informed RRT*":
-            ret = self.InformedRRTStarSearch()
-        else:
-            print("Unsupported Method, please choose one of:")
-            print("RRT, RRT-Connect")
-        end_time = time.time()
-        if not ret:
-            print("Solve Failed")
-            return False
+    def qeAdd(self,vt,x):
+        self.qe.put((self.edgeQueueValue(vt,x),[vt,x]))
+
+    def bestInQv(self):
+        vc,vmt = self.qv.get()
+        self.qv.put((vc,vmt))
+        return (vc,vmt)
+    def bestInQe(self):
+        ec,[wmt,xm] = self.qe.get()
+        self.qe.put((ec,[wmt,xm]))
+        return (ec,[wmt,xm])
+
+    def getCost(self,ind):
+        try:
+            tind = self.Tree.index(ind)
+            cost = self.cost[tind]
+            return cost
+        except:
+            return float('inf')
+
+    # -- Main Part --
+    # decide the order
+    # ---------------
+    def vertexQueueValue(self,vt):
+        return self.cost[vt] + self.costFgHeuristic(self.Tree[vt],h=True)
         
-        print("Get!")
-        # getPath
-        self.getPath()
-        print("path cost(distance): ", self.pathCost," steps: ",len(self.path)," time_use: ",end_time-start_time)
+    def edgeQueueValue(self,wt,x):
+        return self.cost[wt] + self.distance(self.Tree[wt],x) + self.costFgHeuristic(x,h=True)
+        
+    # costHelper
+    def lowerBoundHeuristicEdge(self,vt,x):
+        return self.costFgHeuristic(self.Tree[vt],False) + \
+                    self.costFgHeuristic(x, True) + \
+                        self.distance(self.Tree[vt],x)
+    def lowerBoundHeuristicVertex(self,x):
+        x = self.Tree[x]
+        return self.costFgHeuristic(x,True) + self.costFgHeuristic(x,False) 
+    def lowerBoundHeuristic(self,x):
+        return self.costFgHeuristic(x,True) + self.costFgHeuristic(x,False) 
+    def costFgHeuristic(self,x,h=False):
+        if h: target = 1
+        else: target = 0
+        return self.distance(target,x)
 
-        if show_animation:
-            self.drawGraph()
-            self.drawPath()
-        return ret
-    
-    def getPath(self):
-        # knowing that no more than 2 trees
-        t = self.trees[0]
-        n = t.nodes[-1]
-        sum = 0
-        while n.parent:
-            self.path.append(n.x)
-            n = n.parent
-            sum += n.lcost
-        self.path.append(n.x)
-        if len(self.trees)>1:
-            nl = n
-            n = self.trees[2].root
-            sum += Node.distancenn(nl,n)
-            while n.parent:
-                self.path.insert(0,n.parent.x)
-                n = n.parent
-                sum += n.lcost
+    def distance(self,ind1,ind2):
+        return np.linalg.norm(np.array(self.x[ind1]) - np.array(self.x[ind2]))
+
+    def solve(self):
+        for iterateNum in range(self.maxIter):
+            print("iter: ",iterateNum)
+            if show_animation:
+                self.drawGraph()
+            if self.isEmpty():
+                print("newBatch")
+                self.newBatch()
+            else:
+                ec,[wmt,xm] = self.qe.get()
+                wm = self.Tree[wmt]
+                if self.lowerBoundHeuristicEdge(wmt,xm) > self.bestCost:
+                    # end it.
+                    while not self.qe.empty():
+                        self.qe.get()
+                    while not self.qv.empty():
+                        vc,vt = self.qv.get()
+                        self.vold.append(vt)
+                    continue
                 
-        self.pathCost = sum
-
-    def rrtSearch(self):
-        tree = Tree(self.ninit)
-        self.trees.append(tree)
-        for i in range(self.maxIter):
-            xrand = self.SampleRandomFreeFast()
-            nnearest,dis = tree.getNearest(xrand)
-            nnew = self.Extend(nnearest,xrand)
-            if nnew!=None:
-                tree.addNode(nnew)
-                if(Node.distancenn(nnew,self.ngoal)<self.stepSize):
-                    tree.addNode(self.ngoal,parent=nnew)
-                    print("iter ",i," find!")
-                    return True
-            if show_animation:
-                self.drawGraph(rnd=xrand,new=nnew)
-                plt.pause(0.0001)
-        return False
-
-    def rrtConnectSearch(self):
-        treeI = Tree(nroot=self.ninit)
-        treeG = Tree(nroot=self.ngoal)
-        self.trees.append(treeI)
-        self.trees.append(treeG)
-        tree1 = treeI # the less points one
-        tree2 = treeG
-        for i in range(self.maxIter):
-            xrand = self.SampleRandomFreeFast()
-            nnearest,dis = tree1.getNearest(xrand)
-            nnew = self.Extend(nnearest,xrand)
-            if nnew!=None:
-                tree1.addNode(nnew)
-                nnears = tree2.getNearby(nnew,self.stepSize)
-                if len(nnears):
-                    ncon = nnears[0] # or chose the nearest?
-                    connectTree = Tree(ncon)
-                    self.trees.append(connectTree)
-                    print("iter ",i," find!")
-                    return True
-            
-                # another tree
-                # directly forward to nnew
-                nnearest,dis = tree2.getNearest(nnew.x)
-                nnew2 = self.Extend(nnearest,nnew.x)
-                while nnew2:
-                    tree2.addNode(nnew2)
-                    nnears = tree1.getNearby(nnew2,self.stepSize)
-                    if len(nnears):
-                        ncon = nnears[0]
-                        connectTree = Tree(ncon)
-                        self.trees = [tree2,tree1,connectTree]
-                        print("iter ",i," find!")
-                        return True
-                    nnearest = nnew2
-                    nnew2 = self.Extend(nnearest,nnew.x)
+                ## ExpandEdge
+                if self.collisionEdge(wm,xm):
+                    continue
+                # it's a simple demo, we don't care too much about time-cost
+                # if there's no collision, we add this edge.
+                trueEdgeCost = self.distance(wm,xm)
+                try:
+                    xmt = self.Tree.index(xm)                
+                    # same tree
+                    ## delay rewire?
+                    if self.cost[wmt] + trueEdgeCost >= self.cost[xmt]:
+                        continue
+                    oldparent = self.parent[xmt]
+                    self.children[oldparent].remove(xmt)
+                    self.parent[xmt] = wmt
+                    self.children[wmt].append(xmt)
+                    self.cost[xmt] = self.cost[wmt] + trueEdgeCost # has not update the children TODO
+                    self.depth[xmt] = self.depth[wmt] + 1
+                    self.updateCost(xmt)
                     
-                    if show_animation:
-                        self.drawGraph(rnd=xrand,new=nnew,drawnodes=False)
-                        self.drawTree(treeI,'g')
-                        self.drawTree(treeG,'b')
-                        plt.pause(0.0001)
+                # v->sample
+                except:
+                    xmt = len(self.Tree)
+                    self.Tree.append(xm)
+                    self.parent.append(wmt)
+                    self.children[wmt].append(xmt)
+                    self.children.append([])
+                    self.cost.append(self.cost[wmt] + trueEdgeCost)
+                    self.depth.append(self.depth[wmt]+1)
+                    self.X_sample.remove(xm)
+                    self.qv.put((self.vertexQueueValue(xmt),xmt))
 
-                # check the size,
-                # let the less one to random spare
-                if tree1.length()>tree2.length():
-                    temptree = tree1
-                    tree1 = tree2
-                    tree2 = temptree
+                # a solution
+                if xm == 1:
+                    newCost = self.cost[wmt] + self.distance(wm,xm)
+                    self.GoalInd = xmt
+                    if newCost < self.bestCost:
+                        self.bestCost = newCost
+                        # report?
+                        if self.bestCost == self.map.cMin:
+                            break
 
+        if self.bestCost == float('inf'):
+            print("plan failed")
+        else:
+            self.updateCost(0)
             if show_animation:
-                self.drawGraph(rnd=xrand,new=nnew,drawnodes=False)
-                self.drawTree(treeI,'g')
-                self.drawTree(treeG,'b')
-                plt.pause(0.0001)
-        return False
+                path = self.getPath()       
+                plt.plot([self.x[ind][0] for ind in path], [self.x[ind][1] for ind in path], '-o') 
+                # plt.show() 
+            print("plan finished with cost: ",self.bestCost)
+        # print plan information
+        print("Plan Info:")
+        print("total samples:",len(self.x),"tree:",len(self.Tree))
+        print("edge num:",len(self.parent),"pruned:",self.pruneNum,"(sample:",len(self.x)-len(self.X_sample)-len(self.Tree),")")
+        ## TODO more informations?
 
-    def rrtStarSearch(self):
-        tree = Tree(self.ninit)
-        self.trees.append(tree)
-        for i in range(self.maxIter):
-            xrand = self.SampleRandomFreeFast()
-            nnearest,dis = tree.getNearest(xrand)
-            nnew = self.Extend(nnearest,xrand)
-            if nnew!=None:
-                tree.addNode(nnew)
+    ## ---
+    # while BestQueueValue(Qv) <= BestQueueValue(Qe):
+    #     ExpandVertex(BestValueIn(Qv))
+    def isEmpty(self):
+        while not self.qv.empty():
+            if self.qe.empty():
+                self.expandVertex()
+            else:
+                vcost,vmt = self.bestInQv()
+                ecost,[wmt,xm] = self.bestInQe()
+                if(ecost>=vcost):
+                    self.expandVertex()
+                else:
+                    break
+        while self.qe.empty() and not self.qv.empty():
+            self.expandVertex()
 
-                # adjust
-                self.reParent(nnew,tree)
-                self.reWire(nnew,tree)
+        return self.qe.empty()
 
-                if(Node.distancenn(nnew,self.ngoal)<self.stepSize):
-                    tree.addNode(self.ngoal,parent=nnew)
-                    print("iter ",i," find!")
-                    return True
-            if show_animation:
-                self.drawGraph(rnd=xrand,new=nnew)
-                plt.pause(0.0001)
-        return False
-
-    def _CollisionPoint(self,x): 
-        obs = self.map.obstacles
-        for ob in obs:
-            if Node.distancexx(x,ob[:-1])<=ob[-1]:
-                return True
-        return False
-    def _CollisionLine(self,x1,x2):
-        dis = Node.distancexx(x1,x2)
-        if dis<self.DISCRETE:
+    # f_hat(v,x) < bestCost
+    def edgeInsertConditionSample(self,vt,xind):
+        return  self.lowerBoundHeuristicEdge(vt,xind) < self.bestCost
+    # f_hat(v,x) < bestCost AND (better solution)
+    # Ti_hat(v) + c(v,x) < Ti(x) (optimal tree)
+    def edgeInsertConditionSameTree(self,vt,ivt):
+        if self.parent[vt] == ivt:
             return False
-        nums = int(dis/self.DISCRETE)
-        direction = (np.array(x2)-np.array(x1))/Node.distancexx(x1,x2)
-        for i in range(nums+1):
-            x = np.add(x1 , i*self.DISCRETE*direction)
-            if self._CollisionPoint(x): return True
-        if self._CollisionPoint(x2): return True
-        return False
+        if self.parent[ivt] == vt:
+            return False
+        v = self.Tree[vt]
+        iv = self.Tree[ivt]
+        costTargetHeuristic = self.costFgHeuristic(v,False) + \
+                                self.distance(v,iv)
+        return costTargetHeuristic < self.cost[ivt] and \
+                self.costFgHeuristic(iv, True) + \
+                    costTargetHeuristic < self.bestCost 
 
-    def Nearest(self,xto,nodes=None):
-        if nodes == None:
-            nodes = self.trees[0].nodes
-        dis = float('inf')
-        nnearest = None
-        for node in nodes:
-            curDis = Node.distancenx(node,xto)
-            if curDis < dis:
-                dis = curDis
-                nnearest = node
-        return nnearest
-
-    def Extend(self,nnearest,xrand,step=None):
-        if not step:
-            step = self.stepSize
-        dis = Node.distancenx(nnearest,xrand)
-        if dis<step:
-            xnew = xrand
+    def expandVertex(self):
+        (vcost,vt) = self.qv.get()
+        self.vold.append(vt)
+        if self.lowerBoundHeuristicVertex(vt) > self.bestCost:
+            while not self.qv.empty():
+                vc,vt = self.qv.get()
+                self.vold.append(vt)
         else:
-            dis = step
-            xnew = np.array(nnearest.x) + step*(np.array(xrand)-np.array(nnearest.x))/Node.distancenx(nnearest,xrand)
-        if self._CollisionPoint(xnew):
-            return None
-        if self._CollisionLine(xnew,nnearest.x):
-            return None
-        nnew = Node(xnew,parent=nnearest,lcost=dis)
-        return nnew
+            ## expand vertex
+            # expand to free sample
+            v = self.Tree[vt]
+            xnearby = self.nearby(v,self.X_sample)
+            for xind in xnearby:
+                if self.edgeInsertConditionSample(vt,xind):
+                    self.qeAdd(vt,xind)
+
+            ## expand to tree
+            # expand to the same tree
+            # delay rewire?
+            if self.rewire:
+                inear = self.nearbyT(v)
+                for ivt in inear:
+                    if self.edgeInsertConditionSameTree(vt,ivt):
+                        self.qeAdd(vt,self.Tree[ivt])
+
+    """
+    return nearby(self.r) x in thelist
+    """
+    def nearby(self,vind,thelist):
+        near = []
+        for ind in thelist: # 太暴力…… 下次试试r近邻……
+            if self.distance(ind,vind) < self.r:
+                near.append(ind)
+        return near
+    def nearbyT(self,vind):
+        near = []
+        for ti in range(len(self.Tree)):
+            if self.Tree[ti] != None and self.distance(vind, self.Tree[ti]) < self.r:
+                near.append(ti)
+        return near
+
+    def sample(self,c):
+        if c == float('inf'):
+            for i in range(self.batchSize):
+                self.X_sample.append(len(self.x))
+                self.x.append(self.map.freeSample())
+        else:
+            for i in range(self.batchSize):
+                self.X_sample.append(len(self.x))
+                self.x.append(self.map.informedSample(c))
+    def collisionEdge(self,vind,xind):
+        return self.map.collisionLine(self.x[vind],self.x[xind])
+
+    def newBatch(self):
+        # --debug
+        while not self.qv.empty():
+            vc,vt = self.qv.get()
+            self.vold.append(vt)
+        while not self.qe.empty():
+            self.qe.get()
+        # --
+        # self.updateCost()
+        self.prune()
+        if self.bestCost < float('inf'):
+            self.rewire = True
+        self.sample(self.bestCost)
+        self.r = radius(len(self.x))
+        while len(self.vold) > 0:
+            vt = self.vold.pop()
+            self.qv.put((self.vertexQueueValue(vt),vt))
     
-    def reParent(self,node,tree):
-        # TODO: check node in tree
-        nears = tree.getNearby(node)
-        for n in nears:
-            if self._CollisionLine(n.x,node.x):
-                continue
-            newl = Node.distancenn(n,node)
-            if n.cost + newl < node.cost:
-                node.parent = n
-                node.lcost = newl
-                node.cost = n.cost + newl
-
-    # what if combine the both?
-    def reWire(self,node,tree):
-        nears = tree.getNearby(node)
-        for n in nears:
-            if self._CollisionLine(n.x,node.x):
-                continue
-            newl = Node.distancenn(n,node)
-            if node.cost + newl < n.cost:
-                n.parent = node
-                n.lcost = newl
-                n.cost = node.cost + newl
+    # update the cost of vertex (might be out-of-date because of rewire)
+    # there shoule be some more efficient way (but it's just a simple demo ...
+    def updateCost(self,vt):
+        waitingToUpdate = queue.Queue()
+        for cd in self.children[vt]:
+            waitingToUpdate.put(cd)                
+        while not waitingToUpdate.empty():
+            curV = waitingToUpdate.get()
+            self.cost[curV] = self.cost[self.parent[curV]] + self.distance(self.Tree[curV],self.Tree[self.parent[curV]])
+            for cd in self.children[curV]:
+                waitingToUpdate.put(cd)
+        if self.bestCost < float('inf'):
+            self.bestCost = self.cost[self.GoalInd]
 
 
-    def SampleRandomFreeFast(self):
-        r = random.random()
-        if r<self.prob:
-            return self.map.xgoal
-        else:
-            ret = self._SampleRandom()
-            while self._CollisionPoint(ret):
-                ret = self._SampleRandom()
-        return ret
+    def prune(self):
+        # if prune ...
+        if self.bestCost < float('inf'):
+            # self.updateCost(prune=True)
+            for x in self.X_sample:
+                if self.lowerBoundHeuristic(x) > self.bestCost:
+                    self.X_sample.remove(x)
+                    self.pruneNum += 1
+            pruneVertices = []
+            for vt in range(len(self.Tree)):
+                if self.Tree[vt] == None:
+                    continue
+                if self.lowerBoundHeuristicVertex(vt) > self.bestCost:   
+                    self.deleteVertex(vt,pruneVertices) 
+            self.pruneNum += len(pruneVertices)
+            pruneVertices.sort(reverse=True)
+            for vtp in pruneVertices:
+                self.vold.remove(vtp) 
+                # there's lots of work if we delete it...
+                self.children[vtp] = None # if children have children?
+                self.Tree[vtp] = None 
+                self.cost[vtp] = None
+                self.parent[vtp] = None
+                self.depth[vtp] = None
+                    
+    def deleteVertex(self,vt,pruneVertices):
+        while len(self.children[vt]):
+            print("waring/debug: prune a vertex which has children")
+            cdt = self.children[vt][-1]  
+            self.deleteVertex(cdt,pruneVertices)
+            if self.Tree[cdt] != None and self.lowerBoundHeuristicVertex(cdt) < self.bestCost: 
+                self.X_sample.append(self.Tree[cdt])
+        # # mark as pruned
+        pruneVertices.append(vt)
+        self.Tree[vt] = None
+        pt = self.parent[vt]
+        self.children[pt].remove(vt)
+        
 
-    def _SampleRandom(self):
-        ret = []
-        for i in range(self.dimension):
-            ret.append(random.random()*(self.map.xlimmax[i]-self.map.xlimmin[i])+self.map.xlimmin[i])
-        return ret
+    def getPath(self):
+        reversePath = []
+        curV = self.GoalInd
+        while self.parent[curV] != 0:
+            reversePath.append(self.Tree[curV])
+            curV = self.parent[curV]
+        reversePath.append(self.Tree[curV])
+        
+        # reverse
+        path = [0]
+        while len(reversePath)>0:
+            path.append(reversePath.pop())
 
-    def drawGraph(self, xCenter=None, cBest=None, cMin=None, etheta=None, rnd=None, new=None,drawnodes=True):
-        if self.dimension==2:
-            plt.clf()
-            sysstr = platform.system()
-            if(sysstr =="Windows"):
-                scale = 18
-            elif(sysstr == "Linux"):
-                scale = 24
-            else: scale = 24
-            for (ox, oy, size) in self.map.obstacles:
-                plt.plot(ox, oy, "ok", ms=scale * size)
-            if rnd is not None:
-                plt.plot(rnd[0], rnd[1], "^k")
-            if new is not None:
-                plt.plot(new.x[0], new.x[1], "og")
+        return path
+
+    def drawGraph(self):
+        plt.clf()
+        if self.map.dimension == 2:
+            self.map.drawMap()
+            for xind in self.X_sample:
+                plt.plot(self.x[xind][0],self.x[xind][1],'ob')            
+
+            for vt in range(len(self.Tree)):
+                v = self.Tree[vt]
+                if v == None:
+                    continue
+                plt.plot(self.x[v][0],self.x[v][1],'og')   
+                if self.parent[vt]!=None:          
+                    plt.plot([self.x[v][0], self.x[self.Tree[self.parent[vt]]][0]], 
+                        [self.x[v][1], self.x[self.Tree[self.parent[vt]]][1]], '-g')
             
-            if drawnodes:
-                self.drawTree()
-
-            plt.plot(self.map.xinit[0], self.map.xinit[1], "xr")
-            plt.plot(self.map.xgoal[0], self.map.xgoal[1], "xr")
-            plt.axis([self.map.xlimmin[0],self.map.xlimmax[0],
-            self.map.xlimmin[1],self.map.xlimmax[1]])
-            plt.grid(True)
-        elif self.dimension == 3:            
-            fig = plt.figure()
-            ax = fig.add_subplot(111, projection='3d')
-    
-    def drawTree(self,tree=None,color='g'):
-        if tree==None:
-            trees = self.trees
-        else:
-            trees = [tree]
-        if self.dimension == 2:
-            for t in trees:
-                for node in t.nodes:
-                    if node.parent is not None:
-                        plt.plot([node.x[0], node.parent.x[0]], 
-                        [node.x[1], node.parent.x[1]], '-'+color)
-        elif self.dimension == 3:
-            pass
-
-    def drawPath(self):
-        if self.dimension == 2:
-            plt.plot([x for (x, y) in self.path], [y for (x, y) in self.path], '-r')  
-        elif self.dimension == 3:
-            pass
-
-
-
-
-class Node:
-    def __init__(self,x,lcost=0.0,cost=float('inf'),parent=None):
-        self.x = np.array(x)
-        self.lcost = lcost # from parent
-        self.cost = cost # from init
-        self.parent = parent
-        if parent:
-            self.cost = self.lcost+parent.cost
-        # self.children = children
-
-    @staticmethod
-    def distancenn(n1,n2):
-        return np.linalg.norm(np.array(n1.x)-np.array(n2.x))
-    @staticmethod
-    def distancenx(n,x):
-        return np.linalg.norm(n.x-np.array(x))
-    @staticmethod
-    def distancexx(x1,x2):
-        return np.linalg.norm(np.array(x1)-np.array(x2))
-
-#TODO
-class Tree:
-    def __init__(self,nroot):
-        self.root = nroot
-        self.nodes = [nroot]
-
-    def addNodeFromX(self,x,parent):
-        self.nodes.append(Node(np.array(x),parent=parent))
-    
-    def addNode(self,n,parent=None):
-        if parent:
-            n.parent = parent
-            n.cost = n.lcost + parent.cost
-        self.nodes.append(n)
-    
-    def length(self):
-        return len(self.nodes)
-    
-    def getNearest(self,x):
-        dis = float('inf')
-        nnearest = None
-        for node in self.nodes:
-            curDis = Node.distancenx(node,x)
-            if curDis < dis:
-                dis = curDis
-                nnearest = node
-        return nnearest,dis
-    
-    def getNearby(self,nto,dis=None):
-        ret = []
-        if dis==None:
-            dis = 20.0 * math.sqrt((math.log(self.length()) / self.length()))
-        for n in self.nodes:
-            if Node.distancenn(nto,n)<dis:
-                ret.append(n)
-        return ret
-
+                
+        plt.pause(0.01)
+        #plt.show()
 
 
 if __name__ == '__main__':
-    main()
+    map2Drand = Map()
+    bit = BITstar(map2Drand)
+    # show map
+    if show_animation:
+        bit.map.drawMap()
+        # plt.pause(10)
+    start_time = time.time()
+    bit.solve()
+    print("time_use: ",time.time()-start_time)
+    plt.show()
+
