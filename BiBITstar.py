@@ -30,7 +30,7 @@ def radius(q):
 
 # map
 class Map:
-    def __init__(self,dim=2,obs_num=20,obs_size_max=3,xinit=[0,0],xgoal=[23,23],randMax=[29,29],randMin=[-3,-3]):
+    def __init__(self,dim=2,obs_num=20,obs_size_max=2.5,xinit=[0,0],xgoal=[23,23],randMax=[30,30],randMin=[-5,-5]):
         self.dimension = dim
         self.xinit = xinit
         self.xgoal = xgoal
@@ -118,14 +118,14 @@ class Map:
             
             plt.plot(self.xinit[0],self.xinit[1], "xr")
             plt.plot(self.xgoal[0],self.xgoal[1], "xr")
-            plt.axis([self.randMin[0],self.randMax[0],self.randMin[1],self.randMax[1]])
+            plt.axis([self.randMin[0]-2,self.randMax[0]+2,self.randMin[1]-2,self.randMax[1]+2])
             plt.grid(True)
 
 ### main algorithm
 
 ## main Class
 class BiBITstar(object):
-    def __init__(self,_map,maxIter =300, bn=10,connFactor=0.0):
+    def __init__(self,_map,maxIter =200, bn=5,connFactor=0.0):
         self.map = _map
         self.batchSize = bn
         self.maxIter = maxIter
@@ -136,8 +136,8 @@ class BiBITstar(object):
         self.r = float('inf')
 
         self.qe = queue.PriorityQueue() # ecost,[vtind, xind]
-        self.qv = queue.PriorityQueue()
-        self.vold = []
+        self.qv = queue.PriorityQueue() # the index in Tree
+        self.vold = []                  # the index in Tree
         self.Tree = [0,1]
         # self.Gtree = [0]
         # self.Htree = [1]
@@ -149,6 +149,8 @@ class BiBITstar(object):
         self.children = [[],[]]     # accroding to the order in Tree
         self.depth = [0,0]          # accroding to the order in Tree
         self.conn = {}
+
+        self.pruneNum = 0
 
         self.qv.put((self.distance(0,1),0))
         self.qv.put((self.distance(0,1),1))
@@ -176,15 +178,19 @@ class BiBITstar(object):
         except:
             return float('inf')
 
-    def vertexQueueValue(self,v):
-        # vn = self.nearest(v,not self.isGtree[v])
-        # return self.distance(v,vn)
-        return self.cost[v] + self.costTjHeuristicVertex(v)
+    def vertexQueueValue(self,vt):
+        if self.bestCost < float('inf'):
+            return self.cost[vt] + self.costTjHeuristicVertex(vt)
+        v = self.Tree[vt]
+        vn,dis = self.nearest(v,not self.isGtree[vt])
+        return dis
+        
     def edgeQueueValue(self,wt,x):
-        # vn = self.nearest(x,self.isGtree[w]) # problem: can't update during a batch
-        # return self.distance(w,x) + self.distance(x,vn)
-        return self.cost[wt] + self.distance(self.Tree[wt],x) + self.costTgHeuristic(x,self.isGtree[wt])
-
+        if self.bestCost < float('inf'):
+            return self.cost[wt] + self.distance(self.Tree[wt],x) + self.costTgHeuristic(x,self.isGtree[wt])
+        vn,dis = self.nearest(x,self.isGtree[wt]) # !!problem: can't update during a batch
+        return self.distance(self.Tree[wt],x) + dis
+        
     def lowerBoundHeuristicEdge(self,vt,x):
         return self.costFgHeuristic(self.Tree[vt],not self.isGtree[vt]) + \
                     self.costFgHeuristic(x, self.isGtree[vt]) + \
@@ -253,8 +259,8 @@ class BiBITstar(object):
                     while not self.qe.empty():
                         self.qe.get()
                     while not self.qv.empty():
-                        vc,v = self.qv.get()
-                        self.vold.append(v)
+                        vc,vt = self.qv.get()
+                        self.vold.append(vt)
                     continue
                 
                 ## ExpandEdge
@@ -265,49 +271,47 @@ class BiBITstar(object):
                 trueEdgeCost = self.distance(wm,xm)
                 try:
                     xmt = self.Tree.index(xm)
-                    try:
-                        isG = self.isGtree[xmt]                    
-                        # same tree
-                        ## delay rewire?
-                        if isG == self.isGtree[wmt]:
-                            if self.cost[wmt] + trueEdgeCost >= self.cost[xmt]:
-                                continue
-                            oldparent = self.parent[xmt]
-                            self.children[oldparent].remove(xmt)
-                            self.parent[xmt] = wmt
-                            self.cost[xmt] = self.cost[wmt] + trueEdgeCost # has not update the children TODO
-                            self.depth[xmt] = self.depth[wmt] + 1
+                    isG = self.isGtree[xmt]                    
+                    # same tree
+                    ## delay rewire?
+                    if isG == self.isGtree[wmt]:
+                        if self.cost[wmt] + trueEdgeCost >= self.cost[xmt]:
+                            continue
+                        oldparent = self.parent[xmt]
+                        self.children[oldparent].remove(xmt)
+                        self.parent[xmt] = wmt
+                        self.children[wmt].append(xmt)
+                        self.cost[xmt] = self.cost[wmt] + trueEdgeCost # has not update the children TODO
+                        self.depth[xmt] = self.depth[wmt] + 1
 
-                        # another tree
-                        else:
-                            try:
-                                wcont = self.conn[wmt]
-                                if self.cost[wcont] + self.distance(wm,self.Tree[wcont]) <= \
-                                    self.cost[xmt] + self.distance(wm,xm):
-                                    continue
-                                self.conn.pop(wcont)
-                            except:
-                                pass
-                            try:
-                                xcont = self.conn[xmt]                        
-                                if self.cost[xcont] + self.distance(xm,self.Tree[xcont]) <= \
-                                    self.cost[wmt] + self.distance(xm,wm):
-                                    continue
-                                self.conn.pop(xcont)
-                            except:
-                                pass
-                            # update or create one                        
-                            self.conn[wmt] = xmt
-                            self.conn[xmt] = wmt
-                            newCost = self.cost[wmt] + self.cost[xmt] + self.distance(wm,xm)
-                            if newCost < self.bestCost:
-                                self.bestCost = newCost
-                                # report?
-                                self.bestConn = [wmt,xmt]
-                                if self.bestCost == self.map.cMin:
-                                    break
-                    except:
-                        raise Exception("unknow exception")
+                    # another tree
+                    else:
+                        try:
+                            wcont = self.conn[wmt]
+                            if self.cost[wcont] + self.distance(wm,self.Tree[wcont]) <= \
+                                self.cost[xmt] + self.distance(wm,xm):
+                                continue
+                            self.conn.pop(wcont)
+                        except:
+                            pass
+                        try:
+                            xcont = self.conn[xmt]                        
+                            if self.cost[xcont] + self.distance(xm,self.Tree[xcont]) <= \
+                                self.cost[wmt] + self.distance(xm,wm):
+                                continue
+                            self.conn.pop(xcont)
+                        except:
+                            pass
+                        # update or create one                        
+                        self.conn[wmt] = xmt
+                        self.conn[xmt] = wmt
+                        newCost = self.cost[wmt] + self.cost[xmt] + self.distance(wm,xm)
+                        if newCost < self.bestCost:
+                            self.bestCost = newCost
+                            # report?
+                            self.bestConn = [wmt,xmt]
+                            if self.bestCost == self.map.cMin:
+                                break
                 # v->sample
                 except:
                     xmt = len(self.Tree)
@@ -336,7 +340,7 @@ class BiBITstar(object):
                 gnum += 1
         print("Plan Info:")
         print("total samples:",len(self.x),"Gtree:",gnum,"Htree:",len(self.Tree)-gnum)
-        print("edge num:",len(self.parent),"pruned:",len(self.x)-len(self.X_sample)-len(self.Tree))
+        print("edge num:",len(self.parent),"pruned:",self.pruneNum,"(sample:",len(self.x)-len(self.X_sample)-len(self.Tree),")")
         ## TODO more informations?
 
     ## ---
@@ -416,11 +420,12 @@ class BiBITstar(object):
 
             ## expand to tree
             # expand to the same tree
-            ## TODO delay rewire?
-            inear = self.nearbyT(v,self.isGtree[vt])
-            for ivt in inear:
-                if self.edgeInsertConditionSameTree(vt,ivt):
-                    self.qeAdd(vt,self.Tree[ivt])
+            # delay rewire?
+            if self.bestCost < float('inf'):
+                inear = self.nearbyT(v,self.isGtree[vt])
+                for ivt in inear:
+                    if self.edgeInsertConditionSameTree(vt,ivt):
+                        self.qeAdd(vt,self.Tree[ivt])
             # expand to another tree
             jnear = self.nearbyT(v,not self.isGtree[vt])
             for jvt in jnear:
@@ -458,13 +463,18 @@ class BiBITstar(object):
         return self.map.collisionLine(self.x[vind],self.x[xind])
 
     def newBatch(self):
+        while not self.qv.empty():
+            vc,vt = self.qv.get()
+            self.vold.append(vt)
+        while not self.qe.empty():
+            self.qe.get()
         self.updateCost()
         self.prune()
         self.sample(self.bestCost)
         self.r = radius(len(self.x))
         while len(self.vold) > 0:
-            v = self.vold.pop()
-            self.qv.put((self.vertexQueueValue(v),v))
+            vt = self.vold.pop()
+            self.qv.put((self.vertexQueueValue(vt),vt))
     
     # update the cost of vertex (might be out-of-date because of rewire)
     def updateCost(self,prune = False):
@@ -490,7 +500,49 @@ class BiBITstar(object):
             for x in self.X_sample:
                 if self.lowerBoundHeuristic(x) > self.bestCost:
                     self.X_sample.remove(x)
-
+                    self.pruneNum += 1
+            pruneVertices = []
+            for vt in range(len(self.Tree)):
+                if self.Tree[vt] == None:
+                    continue
+                if self.lowerBoundHeuristicVertex(vt) > self.bestCost:   
+                    self.deleteVertex(vt,pruneVertices) 
+            self.pruneNum += len(pruneVertices)
+            pruneVertices.sort(reverse=True)
+            for vtp in pruneVertices:
+                try:
+                    vtcon = self.conn[vtp]
+                    self.conn.pop(vtcon)
+                    self.conn.pop(vtp)
+                except:
+                    pass
+                self.vold.remove(vtp) 
+                self.children[vtp] = None # if children have children?
+                self.Tree[vtp] = None 
+                self.isGtree[vtp] = None
+                self.cost[vtp] = None
+                self.parent[vtp] = None
+                self.depth[vtp] = None
+            # pruneVertices.sort()
+            # for i in range(len(self.vold)):
+            #     for prv in pruneVertices:
+            #         if self.vold[i] > prv:
+            #             self.vold[i] -= 1   
+            #         else: break     
+                    
+    def deleteVertex(self,vt,pruneVertices):
+        while len(self.children[vt]):
+            print("waring/debug: prune a vertex which has children")
+            cdt = self.children[vt][-1]  
+            self.deleteVertex(cdt,pruneVertices)
+            if self.Tree[cdt] != None and self.lowerBoundHeuristicVertex(cdt) < self.bestCost: 
+                self.X_sample.append(self.Tree[cdt])
+        # # mark as pruned
+        pruneVertices.append(vt)
+        self.Tree[vt] = None
+        pt = self.parent[vt]
+        self.children[pt].remove(vt)
+        
 
     def getPath(self):
         reversePath = []
@@ -531,6 +583,8 @@ class BiBITstar(object):
 
             for vt in range(len(self.Tree)):
                 v = self.Tree[vt]
+                if v == None:
+                    continue
                 cl = 'r'
                 if self.isGtree[vt]:
                     cl = 'g'

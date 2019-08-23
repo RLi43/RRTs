@@ -569,7 +569,7 @@ def main():
     if show_animation:
         rrt.drawGraph()
         plt.pause(0.01)
-        # input("any key to start")
+        input("any key to start")
     rrt.Search()
 
     rrt.drawGraph()
